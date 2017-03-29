@@ -1,5 +1,5 @@
 # file_security
-[![version 1.0.0](https://img.shields.io/badge/pub-1.0.0-brightgreen.svg)](https://pub.dartlang.org/packages/angel_file_security)
+[![version 1.0.1](https://img.shields.io/badge/pub-1.0.1-brightgreen.svg)](https://pub.dartlang.org/packages/angel_file_security)
 [![build status](https://travis-ci.org/angel-dart/file_security.svg)](https://travis-ci.org/angel-dart/file_security)
 
 Middleware for securing file uploads. 

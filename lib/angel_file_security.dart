@@ -42,6 +42,7 @@ RequestMiddleware restrictFileUploads(
       : null;
 
   return (RequestContext req, ResponseContext res) async {
+    await req.parse();
     // Max files
     if (maxFiles != null && req.files.length > maxFiles)
       throw new AngelHttpException(null,

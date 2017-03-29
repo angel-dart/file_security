@@ -27,7 +27,7 @@ class _VirusTotal extends AngelMiddleware {
 
   @override
   Future<bool> call(RequestContext req, ResponseContext res) async {
-    for (var file in req.files) {
+    for (var file in await req.lazyFiles()) {
       await scanFile(file);
     }
 

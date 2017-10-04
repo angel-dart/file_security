@@ -54,7 +54,7 @@ RequestMiddleware restrictFileUploads(
         req.files.any((file) => file.data.length > maxFileSize))
       throw new AngelHttpException(null,
           statusCode: 413,
-          message: 'Uploaded file exceeded max size of $maxFiles byte(s).');
+          message: 'Uploaded file exceeded max size of $maxFileSize byte(s).');
 
     if (allowedExtensions?.isNotEmpty == true) {
       if (req.files.any(

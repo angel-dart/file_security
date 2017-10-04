@@ -12,7 +12,7 @@ RequestMiddleware restrictFileUploads(
     {int maxFiles,
     int maxFileSize,
     Iterable<String> allowedExtensions,
-    Iterable<String> allowedContentTypes}) {
+    Iterable allowedContentTypes}) {
   if (maxFiles != null && maxFiles < 1)
     throw new ArgumentError('maxFiles must be a positive integer.');
 

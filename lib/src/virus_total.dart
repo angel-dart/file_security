@@ -1,114 +1,113 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:angel_framework/angel_framework.dart';
 import 'package:body_parser/body_parser.dart';
-import 'package:charcode/ascii.dart';
-import 'package:random_string/random_string.dart' as rs;
+import 'package:http/src/base_client.dart' as http;
+import 'package:http/src/multipart_file.dart' as http;
+import 'package:http/src/multipart_request.dart' as http;
+import 'package:http/src/response.dart' as http;
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 /// Scans incoming files using VirusTotal's API.
 ///
 /// An error is thrown if the minimum number of positives (default: `3`) is found in the scan report.
 ///
 /// Scans will be checked regularly based on the [checkInterval].
-RequestMiddleware virusScanUploads(String apiKey,
-        {int minPositives, Duration checkInterval}) =>
-    new _VirusTotal(
-        apiKey, minPositives ?? 3, checkInterval ?? new Duration(seconds: 5));
-
-class _VirusTotal extends AngelMiddleware {
-  static const String ENDPOINT = 'https://www.virustotal.com/vtapi/v2';
+class VirusTotalScanner {
   final String apiKey;
-  final Duration checkInterval;
-  final HttpClient client = new HttpClient();
-  final int minPositives;
+  final http.BaseClient client;
+  int minPositives;
+  Duration checkInterval;
+  String endpoint;
 
-  _VirusTotal(this.apiKey, this.minPositives, this.checkInterval);
+  VirusTotalScanner(this.apiKey, this.client,
+      {this.checkInterval, this.endpoint, this.minPositives}) {
+    this.checkInterval ??= const Duration(seconds: 5);
+    this.endpoint ??= 'https://www.virustotal.com/vtapi/v2';
+    this.minPositives ??= 3;
+  }
 
-  @override
-  Future<bool> call(RequestContext req, ResponseContext res) async {
+  /// Virus-scans all files uploaded within this request.
+  Future<bool> handleRequest(RequestContext req, ResponseContext res) async {
     for (var file in await req.lazyFiles()) {
-      await scanFile(file);
+      if (await scanFile(file))
+        throw new AngelHttpException.badRequest(
+            message: 'Malicious upload blocked.');
     }
 
-    client.close(force: true);
     return true;
   }
 
-  writeln(StringBuffer buf, [String text]) {
-    buf
-      ..write(text ?? '')
-      ..writeCharCode($cr)
-      ..writeCharCode($lf);
-  }
+  /// Queries VirusTotal, and returns `true` if a file is malicious in nature.
+  Future<bool> scanFile(FileUploadInfo file) async {
+    var rq =
+        new http.MultipartRequest('POST', Uri.parse('$endpoint/file/scan'));
 
-  scanFile(FileUploadInfo file) async {
-    var rq = await client.openUrl('POST', Uri.parse('$ENDPOINT/file/scan'));
-    var boundary = '-----' + rs.randomAlphaNumeric(24);
+    rq.headers.addAll({
+      'accept': 'application/json',
+      'accept-encoding': 'gzip',
+    });
 
-    var buf = new StringBuffer();
-
-    // Add API Key
-    writeln(buf, boundary);
-    writeln(buf, 'Content-Disposition: form-data; name="apikey"');
-    writeln(buf);
-    writeln(buf, apiKey);
+    // Add API key
+    rq.fields['apikey'] = apiKey;
 
     // Add actual file
-    writeln(buf, boundary);
-    writeln(buf,
-        'Content-Disposition: form-data; name="file"; filename="${file.filename}"');
-    writeln(buf, 'Content-Type: ${file.mimeType}');
-    writeln(buf);
-    file.data.forEach(buf.writeCharCode);
-    writeln(buf);
+    rq.files.add(new http.MultipartFile(
+      'file',
+      new Stream<List<int>>.fromIterable([file.data]),
+      file.data.length,
+      filename: file.filename,
+      contentType: new MediaType.parse(file.mimeType),
+    ));
 
-    // Finish it
-    writeln(buf, '$boundary--');
+    var rs =
+        await client.send(rq).then<http.Response>(http.Response.fromStream);
 
-    rq.headers
-      ..set(HttpHeaders.ACCEPT, ContentType.JSON.mimeType)
-      ..set(HttpHeaders.ACCEPT_ENCODING, 'gzip')
-      ..set(HttpHeaders.CONTENT_LENGTH, buf.length)
-      ..set(
-          HttpHeaders.CONTENT_TYPE, 'multipart/form-data; boundary=$boundary');
-    rq.write(buf.toString());
+    if (new MediaType.parse(rs.headers['content-type']).mimeType !=
+        'application/json') {
+      throw new StateError(
+          'VirusTotal did not response with JSON (status: ${rs.statusCode}). Response: "${rs.body}"');
+    }
 
-    var res = await rq.close();
-    var json = JSON.decode(await res.transform(UTF8.decoder).join());
-    String scanId = json['scan_id'];
+    var json = JSON.decode(rs.body);
+    var scanId = json['scan_id'];
 
-    var c = new Completer();
+    if (scanId == null)
+      throw new StateError(
+          'VirusTotal did not send the ID of a scan report. Did you provide an API key?');
 
-    new Timer.periodic(checkInterval, (_) async {
-      var rq = await client.openUrl('POST', Uri.parse('$ENDPOINT/url/report'));
+    var c = new Completer<bool>();
 
-      var bodyFields = {'apikey': apiKey, 'resource': scanId};
+    callback(_) async {
+      var rs = await client.post('$endpoint/url/report', headers: {
+        'accept': 'application/json',
+        'accept-encoding': 'gzip',
+      }, body: {
+        'apikey': apiKey,
+        'resource': scanId,
+      });
 
-      var data = bodyFields.keys.fold<List<String>>(
-          [],
-          (out, key) => out
-            ..add('$key=' + Uri.encodeComponent(bodyFields[key]))).join('&');
+      if (new MediaType.parse(rs.headers['content-type']).mimeType !=
+          'application/json') {
+        throw new StateError(
+            'VirusTotal did not response with JSON (status: ${rs.statusCode}). Response: "${rs.body}"');
+      }
 
-      rq.headers
-        ..set(HttpHeaders.ACCEPT, ContentType.JSON.mimeType)
-        ..set(HttpHeaders.ACCEPT_ENCODING, 'gzip')
-        ..set(HttpHeaders.CONTENT_LENGTH, data.length);
-      rq.write(data);
-
-      var res = await rq.close();
-      var json = JSON.decode(await res.transform(UTF8.decoder).join());
+      var json = JSON.decode(rs.body);
 
       if (json['positives'] is int) {
         int positives = json['positives'];
 
-        if (positives >= minPositives)
-          c.completeError(new AngelHttpException.conflict(
-              message: 'Malicious upload blocked.'));
-        else
-          c.complete();
+        if (positives >= 1 && !c.isCompleted)
+          c.complete(true);
+        else if (!c.isCompleted) c.complete(false);
       }
-    });
+    }
+
+    await callback(null);
+
+    if (!c.isCompleted) new Timer.periodic(checkInterval, callback);
 
     return await c.future;
   }

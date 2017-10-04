@@ -1,5 +1,5 @@
 # file_security
-[![version 1.0.1](https://img.shields.io/badge/pub-1.0.1-brightgreen.svg)](https://pub.dartlang.org/packages/angel_file_security)
+[![Pub](https://img.shields.io/pub/v/angel_file_security.svg)](https://pub.dartlang.org/packages/angel_file_security)
 [![build status](https://travis-ci.org/angel-dart/file_security.svg)](https://travis-ci.org/angel-dart/file_security)
 
 Middleware for securing file uploads. 
@@ -18,16 +18,27 @@ from [`angel_security`](https://pub.dartlang.org/packages/angel_security).
 
 # Usage
 ```dart
-import 'package:angel_common/angel_common.dart';
+import 'package:angel_framework/angel_framework.dart';
 import 'package:angel_file_security/angel_file_security.dart';
+import 'package:http/http.dart' as http;
 
-configureServer(app) async {
-    app
-        .chain(restrictFileUploads(
-            maxFiles: 3,
-            maxFileSize: 2000,
-            allowedExtensions: ['.jpg', '.png', '.gif']))
-        .chain(virusScanUploads('<your-api-key-here>'))
-        .get(...);
+Future configureServer(Angel app) async {
+  var middleware = restrictFileUploads(
+    maxFiles: 3,
+    maxFileSize: 2000,
+    allowedExtensions: ['.jpg', '.png', '.gif'],
+    allowedContentTypes: ['image/jpeg', 'image/png', 'image/gif'],
+  );
+  
+  var virusScanner = new VirusTotalScanner(
+    '<your-api-key>',
+    new http.Client(),
+  );
+  
+  app
+    .chain([middleware, virusScanner.handleRequest])
+    .post('/api/upload', (req, res) {
+      // Secure...
+    });
 }
 ```

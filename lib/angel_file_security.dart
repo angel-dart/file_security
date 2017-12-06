@@ -71,5 +71,7 @@ RequestMiddleware restrictFileUploads(
             message:
                 'Files must have one of the following MIME types: ${_allowedContentTypes.join(",")}');
     }
+
+    return true;
   };
 }
